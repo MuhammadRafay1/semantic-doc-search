@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# Cloned docs repo (regenerate with build_index.py --clone)
+data/apimatic-docs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Embedding model cache (large)
+Vector_Store/apimatic_faiss_index/
+data/apimatic-docs/
+# Keep the Vector_Store (pre-built index ships with deployment)
+# To exclude it, uncomment below:
+# Vector_Store/
+*.pkl
+.env

@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────
+# Render.com — One-click deployment config
+# ─────────────────────────────────────────────
+services:
+  - type: web
+    name: apimatic-doc-search
+    runtime: python
+    buildCommand: pip install -r requirement.txt
+    startCommand: uvicorn app.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: GROQ_MODEL
+        value: qwen/qwen3-32b
+      - key: EMBEDDING_MODEL
+        value: sentence-transformers/all-mpnet-base-v2
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    plan: free
+    healthCheckPath: /api/health

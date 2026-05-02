@@ -1,0 +1,30 @@
+# Core Dependencies
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-text-splitters>=0.0.1
+langchain-core>=0.1.0
+sentence-transformers>=2.3.0
+transformers>=4.36.0
+
+# Vector Databases
+faiss-cpu>=1.8.0
+chromadb>=0.4.22
+
+# Document Processing
+PyPDF2>=3.0.0
+python-docx>=1.1.0
+tiktoken>=0.5.0
+
+# Web Server
+fastapi>=0.109.0
+uvicorn[standard]>=0.25.0
+python-dotenv>=1.0.0
+
+# LLM (Groq via OpenAI-compatible client)
+openai>=1.12.0
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
+tqdm>=4.66.0
+pydantic>=2.0.0
