@@ -28,3 +28,6 @@ numpy>=1.24.0
 pandas>=2.0.0
 tqdm>=4.66.0
 pydantic>=2.0.0
+
+# Web Search (Serper)
+requests>=2.31.0

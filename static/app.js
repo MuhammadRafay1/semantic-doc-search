@@ -1,5 +1,6 @@
 /* ═══════════════════════════════════════════════════════════
    APIMatic Doc Search — Frontend Application Logic
+   Semantic RAG with Citations, Confidence Scoring, Web Search
    ═══════════════════════════════════════════════════════════ */
 
 // ─── State ───
@@ -21,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function checkHealth() {
     const dot = document.getElementById('statusDot');
     const text = document.getElementById('statusText');
+    const webBadge = document.getElementById('webSearchStatus');
 
     try {
         const res = await fetch('/api/health');
@@ -33,6 +35,12 @@ async function checkHealth() {
         } else {
             dot.className = 'status-dot offline';
             text.textContent = 'Index not loaded';
+        }
+
+        // Web search status
+        if (data.web_search_available) {
+            webBadge.style.display = 'flex';
+            webBadge.classList.add('active');
         }
     } catch {
         dot.className = 'status-dot offline';
@@ -47,6 +55,7 @@ async function performSearch() {
 
     const topK = parseInt(document.getElementById('topK').value);
     const useLLM = document.getElementById('useLLM').checked;
+    const useWebSearch = document.getElementById('useWebSearch').checked;
     const btn = document.getElementById('searchBtn');
     const resultsContainer = document.getElementById('resultsContainer');
 
@@ -56,11 +65,14 @@ async function performSearch() {
     resultsContainer.style.display = 'block';
     document.getElementById('suggestions').style.display = 'none';
 
+    // Reset all sections
+    resetResultsUI();
+
     // Save to history
     addToHistory(query);
 
     if (useLLM) {
-        await performStreamingSearch(query, topK);
+        await performStreamingSearch(query, topK, useWebSearch);
     } else {
         await performQuickSearch(query, topK);
     }
@@ -70,8 +82,20 @@ async function performSearch() {
     btn.disabled = false;
 }
 
+function resetResultsUI() {
+    document.getElementById('aiAnswerCard').style.display = 'none';
+    document.getElementById('confidenceBanner').style.display = 'none';
+    document.getElementById('confidenceBadge').style.display = 'none';
+    document.getElementById('citationsSection').style.display = 'none';
+    document.getElementById('llmNotice').style.display = 'none';
+    document.getElementById('sourcesHeader').style.display = 'none';
+    document.getElementById('sourcesGrid').innerHTML = '';
+    document.getElementById('webSourcesHeader').style.display = 'none';
+    document.getElementById('webSourcesGrid').innerHTML = '';
+}
+
 // ─── Streaming Search (with LLM) ───
-async function performStreamingSearch(query, topK) {
+async function performStreamingSearch(query, topK, useWebSearch) {
     const aiCard = document.getElementById('aiAnswerCard');
     const aiBody = document.getElementById('aiAnswerBody');
     const aiMeta = document.getElementById('aiMeta');
@@ -84,9 +108,6 @@ async function performStreamingSearch(query, topK) {
     aiCard.style.display = 'block';
     aiBody.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
     aiMeta.textContent = '';
-    sourcesGrid.innerHTML = '';
-    llmNotice.style.display = 'none';
-    sourcesHeader.style.display = 'none';
 
     const startTime = performance.now();
 
@@ -94,7 +115,12 @@ async function performStreamingSearch(query, topK) {
         const res = await fetch('/api/search/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, top_k: topK, use_llm: true }),
+            body: JSON.stringify({
+                query,
+                top_k: topK,
+                use_llm: true,
+                use_web_search: useWebSearch,
+            }),
         });
 
         const reader = res.body.getReader();
@@ -118,9 +144,15 @@ async function performStreamingSearch(query, topK) {
 
                     switch (event.type) {
                         case 'sources':
-                            renderSources(event.data);
+                            renderSources(event.data, 'embedding');
                             sourcesHeader.style.display = 'flex';
-                            resultCount.textContent = `${event.data.length} documents`;
+                            resultCount.textContent = `${event.data.length} chunks`;
+                            break;
+
+                        case 'web_sources':
+                            renderSources(event.data, 'web');
+                            document.getElementById('webSourcesHeader').style.display = 'flex';
+                            document.getElementById('webResultCount').textContent = `${event.data.length} pages`;
                             break;
 
                         case 'token':
@@ -130,6 +162,14 @@ async function performStreamingSearch(query, topK) {
                             answerText += event.data;
                             aiBody.innerHTML = renderMarkdown(answerText);
                             aiBody.scrollTop = aiBody.scrollHeight;
+                            break;
+
+                        case 'citations':
+                            renderCitations(event.data);
+                            break;
+
+                        case 'confidence':
+                            renderConfidence(event.data);
                             break;
 
                         case 'error':
@@ -169,15 +209,13 @@ async function performQuickSearch(query, topK) {
     const llmNotice = document.getElementById('llmNotice');
 
     aiCard.style.display = 'none';
-    sourcesGrid.innerHTML = '';
-    llmNotice.style.display = 'none';
 
     try {
         const res = await fetch(`/api/search/quick?q=${encodeURIComponent(query)}&k=${topK}`);
         const data = await res.json();
 
         if (data.results && data.results.length > 0) {
-            renderSources(data.results);
+            renderSources(data.results, 'embedding');
             sourcesHeader.style.display = 'flex';
             resultCount.textContent = `${data.results.length} documents · ${data.latency_ms.toFixed(0)}ms`;
         } else {
@@ -192,39 +230,134 @@ async function performQuickSearch(query, topK) {
     }
 }
 
-// ─── Render Sources ───
-function renderSources(sources) {
-    const grid = document.getElementById('sourcesGrid');
-    grid.innerHTML = sources.map((src, idx) => {
-        const score = src.relevance_score;
-        const scoreClass = score < 0.5 ? 'high' : score < 1.0 ? 'medium' : 'low';
-        const scoreLabel = score < 0.5 ? 'High' : score < 1.0 ? 'Medium' : 'Low';
-        const preview = escapeHtml(src.preview || src.chunk_preview || '');
+// ─── Render Citations ───
+function renderCitations(citations) {
+    if (!citations || citations.length === 0) return;
+
+    const section = document.getElementById('citationsSection');
+    const list = document.getElementById('citationsList');
+    section.style.display = 'block';
+
+    list.innerHTML = citations.map((c, idx) => {
+        const id = c.id || idx + 1;
+        const type = c.type || 'embedding';
+        const typeIcon = type === 'web'
+            ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'
+            : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+        const sourceDisplay = c.url
+            ? `<a href="${escapeHtml(c.url)}" target="_blank" rel="noopener" class="citation-link">${escapeHtml(c.source || c.title)}</a>`
+            : `<span class="citation-source-name">${escapeHtml(c.source || c.title)}</span>`;
 
         return `
-            <div class="source-card" style="animation: fadeInUp 0.3s ease ${idx * 0.05}s both;">
+            <div class="citation-item" style="animation: fadeInUp 0.2s ease ${idx * 0.05}s both;">
+                <div class="citation-id">[${id}]</div>
+                <div class="citation-content">
+                    <div class="citation-header">
+                        <span class="citation-type ${type}">${typeIcon} ${type}</span>
+                        ${sourceDisplay}
+                    </div>
+                    ${c.excerpt ? `<div class="citation-excerpt">${escapeHtml(c.excerpt)}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// ─── Render Confidence ───
+function renderConfidence(data) {
+    const confidence = data.confidence;
+    const isConfident = data.is_confident;
+
+    // Badge in AI header
+    const badge = document.getElementById('confidenceBadge');
+    const dot = document.getElementById('confidenceDot');
+    const label = document.getElementById('confidenceLabel');
+    const value = document.getElementById('confidenceValue');
+
+    badge.style.display = 'flex';
+    value.textContent = `${(confidence * 100).toFixed(0)}%`;
+
+    if (confidence >= 0.8) {
+        dot.className = 'confidence-dot high';
+        label.textContent = 'High';
+        badge.className = 'confidence-badge high';
+    } else if (confidence >= 0.5) {
+        dot.className = 'confidence-dot medium';
+        label.textContent = 'Medium';
+        badge.className = 'confidence-badge medium';
+    } else {
+        dot.className = 'confidence-dot low';
+        label.textContent = 'Low';
+        badge.className = 'confidence-badge low';
+    }
+
+    // Show banner for low confidence
+    if (!isConfident) {
+        const banner = document.getElementById('confidenceBanner');
+        banner.style.display = 'flex';
+        document.getElementById('confidenceBannerDetail').textContent =
+            `Confidence: ${(confidence * 100).toFixed(0)}% — The AI may not have enough relevant documentation to answer accurately.`;
+    }
+}
+
+// ─── Render Sources ───
+function renderSources(sources, type) {
+    const gridId = type === 'web' ? 'webSourcesGrid' : 'sourcesGrid';
+    const grid = document.getElementById(gridId);
+
+    const html = sources.map((src, idx) => {
+        const score = src.relevance_score;
+        const isWeb = type === 'web' || src.type === 'web';
+        const preview = escapeHtml(src.preview || src.chunk_preview || src.snippet || '');
+
+        let scoreHtml = '';
+        if (!isWeb && score !== undefined) {
+            const scoreClass = score < 0.5 ? 'high' : score < 1.0 ? 'medium' : 'low';
+            const scoreLabel = score < 0.5 ? 'High' : score < 1.0 ? 'Medium' : 'Low';
+            scoreHtml = `<span class="source-score ${scoreClass}">${scoreLabel} · ${score.toFixed(3)}</span>`;
+        }
+
+        const typeIcon = isWeb
+            ? `<div class="source-file-icon web">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                </svg>
+               </div>`
+            : `<div class="source-file-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+               </div>`;
+
+        const titleHtml = isWeb && src.url
+            ? `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener" class="source-filename-link">${escapeHtml(src.filename || src.title)}</a>`
+            : `<div class="source-filename">${escapeHtml(src.filename || '')}</div>`;
+
+        return `
+            <div class="source-card ${isWeb ? 'web' : ''}" style="animation: fadeInUp 0.3s ease ${idx * 0.05}s both;">
                 <div class="source-card-header">
                     <div class="source-file">
-                        <div class="source-file-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14 2 14 8 20 8"/>
-                                <line x1="16" y1="13" x2="8" y2="13"/>
-                                <line x1="16" y1="17" x2="8" y2="17"/>
-                            </svg>
-                        </div>
+                        ${typeIcon}
                         <div>
-                            <div class="source-filename">${escapeHtml(src.filename)}</div>
-                            ${src.title ? `<div class="source-title">${escapeHtml(src.title)}</div>` : ''}
+                            ${titleHtml}
+                            ${src.title && !isWeb ? `<div class="source-title">${escapeHtml(src.title)}</div>` : ''}
                         </div>
                     </div>
-                    <span class="source-score ${scoreClass}">${scoreLabel} · ${score.toFixed(3)}</span>
+                    ${scoreHtml}
+                    ${isWeb ? '<span class="source-type-badge web">Web</span>' : '<span class="source-type-badge emb">Embedding</span>'}
                 </div>
                 ${src.category ? `<span class="source-category">${escapeHtml(src.category)}</span>` : ''}
                 <div class="source-preview">${preview}</div>
             </div>
         `;
     }).join('');
+
+    grid.innerHTML += html;
 }
 
 // ─── Markdown Renderer (lightweight) ───
@@ -256,8 +389,14 @@ function renderMarkdown(text) {
     // Ordered lists
     html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
 
+    // Citation references — style them as badges
+    html = html.replace(/\[(\d+)\]/g, '<span class="citation-ref">[$1]</span>');
+
     // Links
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+    // Horizontal rules
+    html = html.replace(/^---$/gm, '<hr>');
 
     // Paragraphs (double newlines)
     html = html.replace(/\n\n/g, '</p><p>');

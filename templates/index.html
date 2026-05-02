@@ -4,9 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>APIMatic Doc Search — Intelligent Documentation Search</title>
+    <title>APIMatic Doc Search — Semantic RAG Documentation Search</title>
     <meta name="description"
-        content="Search APIMatic documentation with AI-powered semantic search and intelligent answers.">
+        content="Search APIMatic documentation with AI-powered semantic search, web RAG, citations, and confidence scoring.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -16,10 +16,6 @@
 </head>
 
 <body>
-    <!-- Animated Background -->
-    <div class="bg-gradient"></div>
-    <div class="bg-grid"></div>
-
     <!-- App Container -->
     <div id="app">
         <!-- Header -->
@@ -41,12 +37,22 @@
                     </div>
                     <div>
                         <h1 class="logo-text">APIMatic <span class="logo-accent">Doc Search</span></h1>
-                        <p class="logo-tagline">AI-powered documentation intelligence</p>
+                        <p class="logo-tagline">Semantic RAG · Citations · Confidence Scoring</p>
                     </div>
                 </div>
-                <div class="header-status">
-                    <div class="status-dot" id="statusDot"></div>
-                    <span class="status-text" id="statusText">Connecting...</span>
+                <div class="header-badges">
+                    <div class="header-status">
+                        <div class="status-dot" id="statusDot"></div>
+                        <span class="status-text" id="statusText">Connecting...</span>
+                    </div>
+                    <div class="header-status" id="webSearchStatus" style="display: none;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                        </svg>
+                        <span class="status-text">Web Search</span>
+                    </div>
                 </div>
             </div>
         </header>
@@ -56,7 +62,8 @@
             <div class="search-container">
                 <div class="search-hero">
                     <h2 class="search-title">What would you like to know?</h2>
-                    <p class="search-subtitle">Search across APIMatic documentation with semantic understanding</p>
+                    <p class="search-subtitle">Semantic search across APIMatic docs with AI-powered answers, live web
+                        search, and source citations</p>
                 </div>
 
                 <div class="search-box-wrapper">
@@ -86,6 +93,11 @@
                                 <span class="toggle-slider"></span>
                                 <span class="toggle-label">AI Answer</span>
                             </label>
+                            <label class="llm-toggle" title="Search docs.apimatic.io via web">
+                                <input type="checkbox" id="useWebSearch" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Web</span>
+                            </label>
                             <button class="search-btn" id="searchBtn" onclick="performSearch()">
                                 <span class="btn-text">Search</span>
                                 <span class="btn-loader" id="btnLoader"></span>
@@ -107,6 +119,25 @@
 
             <!-- Results Area -->
             <div class="results-container" id="resultsContainer" style="display: none;">
+
+                <!-- Confidence Banner (shown when low confidence) -->
+                <div class="confidence-banner low" id="confidenceBanner" style="display: none;">
+                    <div class="confidence-banner-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                            <line x1="12" y1="9" x2="12" y2="13" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                    </div>
+                    <div class="confidence-banner-text">
+                        <strong>Low confidence answer</strong>
+                        <span id="confidenceBannerDetail">The AI is not fully confident in this response. Results may be
+                            incomplete.</span>
+                    </div>
+                </div>
+
                 <!-- AI Answer Card -->
                 <div class="ai-answer-card" id="aiAnswerCard" style="display: none;">
                     <div class="ai-answer-header">
@@ -119,12 +150,32 @@
                             </svg>
                             AI Answer
                         </div>
-                        <div class="ai-meta" id="aiMeta"></div>
+                        <div class="ai-header-right">
+                            <div class="confidence-badge" id="confidenceBadge" style="display: none;">
+                                <div class="confidence-dot" id="confidenceDot"></div>
+                                <span id="confidenceLabel">--</span>
+                                <span class="confidence-value" id="confidenceValue"></span>
+                            </div>
+                            <div class="ai-meta" id="aiMeta"></div>
+                        </div>
                     </div>
                     <div class="ai-answer-body" id="aiAnswerBody">
                         <div class="typing-indicator" id="typingIndicator">
                             <span></span><span></span><span></span>
                         </div>
+                    </div>
+
+                    <!-- Citations Section -->
+                    <div class="citations-section" id="citationsSection" style="display: none;">
+                        <div class="citations-header">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                            </svg>
+                            <span>Citations</span>
+                        </div>
+                        <div class="citations-list" id="citationsList"></div>
                     </div>
                 </div>
 
@@ -137,12 +188,25 @@
                     <span id="llmNoticeText"></span>
                 </div>
 
-                <!-- Source Documents -->
-                <div class="sources-header" id="sourcesHeader">
-                    <h3>Source Documents</h3>
+                <!-- Web Sources -->
+                <div class="sources-header web-sources-header" id="webSourcesHeader" style="display: none;">
+                    <h3>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" style="vertical-align: -2px; margin-right: 6px;">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                        </svg>
+                        Web Sources
+                    </h3>
+                    <span class="result-count" id="webResultCount"></span>
+                </div>
+                <div class="sources-grid web-grid" id="webSourcesGrid"></div>
+
+                <!-- Embedding Source Documents -->
+                <div class="sources-header" id="sourcesHeader" style="display: none;">
+                    <h3>Embedding Sources</h3>
                     <span class="result-count" id="resultCount"></span>
                 </div>
-
                 <div class="sources-grid" id="sourcesGrid"></div>
             </div>
 
@@ -158,7 +222,8 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>Powered by <strong>FAISS</strong> embeddings + <strong>Groq</strong> LLM &middot; APIMatic Internal Tool
+            <p>Powered by <strong>FAISS</strong> embeddings + <strong>Serper</strong> web search + <strong>Groq</strong>
+                LLM &middot; Semantic RAG with Citations
             </p>
         </footer>
     </div>

@@ -118,6 +118,19 @@ GROQ_RATE_LIMIT_RPM = 30  # Requests per minute
 GROQ_RATE_LIMIT_RPD = 1000  # Requests per day
 
 # ─────────────────────────────────────────────
+# Serper Web Search Configuration
+# ─────────────────────────────────────────────
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+SERPER_BASE_URL = "https://google.serper.dev/search"
+SERPER_SITE_FILTER = os.getenv("SERPER_SITE_FILTER", "docs.apimatic.io")
+SERPER_NUM_RESULTS = int(os.getenv("SERPER_NUM_RESULTS", "5"))
+
+# ─────────────────────────────────────────────
+# Confidence Threshold
+# ─────────────────────────────────────────────
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.4"))
+
+# ─────────────────────────────────────────────
 # FAISS Index Persistence
 # ─────────────────────────────────────────────
 FAISS_INDEX_PATH = VECTOR_STORE_DIR / "apimatic_faiss_index"
