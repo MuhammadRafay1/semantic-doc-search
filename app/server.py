@@ -294,13 +294,15 @@ async def search(request: SearchRequest):
 
         if web_response.success:
             for wr in web_response.results:
+                # Use scraped content for preview if available
+                preview = wr.page_content[:500] + "..." if wr.page_content and len(wr.page_content) > 500 else (wr.page_content or wr.snippet)
                 web_results_formatted.append(SearchResult(
                     filename=wr.title,
                     source=wr.url,
                     title=wr.title,
                     category="docs.apimatic.io",
                     relevance_score=0,
-                    chunk_preview=wr.snippet,
+                    chunk_preview=preview,
                     result_type="web",
                     url=wr.url,
                 ))
@@ -308,6 +310,7 @@ async def search(request: SearchRequest):
                     "title": wr.title,
                     "url": wr.url,
                     "snippet": wr.snippet,
+                    "page_content": wr.page_content,
                 })
 
     # ── 3. LLM Answer Generation ──
@@ -434,10 +437,12 @@ async def search_stream(request: SearchRequest):
         web_response = serper.search_for_question(request.query)
         if web_response.success:
             for wr in web_response.results:
+                preview = wr.page_content[:400] + "..." if wr.page_content and len(wr.page_content) > 400 else (wr.page_content or wr.snippet)
                 web_results_raw.append({
                     "title": wr.title,
                     "url": wr.url,
                     "snippet": wr.snippet,
+                    "page_content": wr.page_content,
                 })
                 web_sources.append({
                     "filename": wr.title,
@@ -445,7 +450,7 @@ async def search_stream(request: SearchRequest):
                     "url": wr.url,
                     "category": "docs.apimatic.io",
                     "relevance_score": 0,
-                    "preview": wr.snippet,
+                    "preview": preview,
                     "type": "web",
                 })
 

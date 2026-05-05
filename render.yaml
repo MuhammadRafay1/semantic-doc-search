@@ -12,8 +12,10 @@ services:
         sync: false  # Set manually in Render dashboard
       - key: GROQ_MODEL
         value: qwen/qwen3-32b
+      - key: SERPER_API_KEY
+        sync: false  # Set manually in Render dashboard
       - key: EMBEDDING_MODEL
-        value: sentence-transformers/all-mpnet-base-v2
+        value: sentence-transformers/all-MiniLM-L6-v2
       - key: PYTHONUNBUFFERED
         value: "1"
     plan: free

@@ -5,6 +5,7 @@ and merged context from both embeddings and web search results.
 """
 
 import json
+import re
 import time
 import logging
 from typing import List, Dict, Optional, Generator
@@ -28,55 +29,54 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 # RAG Prompt Templates
 # ─────────────────────────────────────────────
-SYSTEM_PROMPT = """You are an expert APIMatic documentation assistant. Your role is to help developers find and understand APIMatic's features, APIs, SDKs, and tools.
+SYSTEM_PROMPT = """/no_think
+You are an expert APIMatic documentation assistant. You help developers understand APIMatic's platform — API transformation, SDK generation, developer portals, API validation, and related features.
 
-You MUST respond with a valid JSON object. No text before or after the JSON.
+You MUST respond with a single valid JSON object. No markdown fencing, no text before or after the JSON.
 
-RESPONSE FORMAT (strict JSON):
+JSON SCHEMA:
 {
-  "answer": "Your detailed answer in markdown format...",
+  "answer": "<detailed markdown answer>",
   "citations": [
     {
       "id": 1,
-      "source": "filename or URL",
-      "title": "Document title",
+      "source": "<filename or page title>",
+      "title": "<document title>",
       "type": "embedding|web",
-      "excerpt": "Brief relevant excerpt from the source"
+      "url": "<full URL if web source, empty string if embedding>",
+      "excerpt": "<a short verbatim excerpt you used from this source>"
     }
   ],
   "confidence": 0.85
 }
 
-RULES:
-1. Answer ONLY based on the provided documentation context. Never fabricate information.
-2. The "citations" array MUST contain every source you used. Reference them in your answer as [1], [2], etc.
-3. The "confidence" field is a float from 0.0 to 1.0 representing how confident you are that your answer is correct and complete based on the available context.
-   - 0.8-1.0: High confidence — context clearly answers the question
-   - 0.5-0.79: Medium confidence — partial information available
-   - 0.2-0.49: Low confidence — very limited relevant information
-   - 0.0-0.19: No confidence — context does not address the question
-4. If the context doesn't contain enough information, set confidence LOW and explain what's missing.
-5. Use clear, concise language appropriate for developers.
-6. Format the "answer" field using markdown for readability (headers, code blocks, lists).
-7. For code-related questions, provide code examples when available in the context.
-8. If multiple documents are relevant, synthesize the information coherently.
-9. ALWAYS cite your sources inline using [1], [2], etc.
-10. Do NOT include ```json or any wrapper around your response — output raw JSON only."""
+CRITICAL RULES:
+1. Your answer MUST be detailed, thorough, and developer-friendly. Use markdown headers (##), bullet points, code blocks, and step-by-step instructions where relevant. Do NOT give one-liner answers.
+2. Answer ONLY based on the provided context. Never invent information.
+3. EVERY source you reference must appear in the "citations" array. Use inline references like [1], [2] in your answer text.
+4. For WEB sources, ALWAYS include the full URL in the "url" field. This is critical — users need clickable links.
+5. For EMBEDDING sources, set "url" to an empty string "".
+6. "confidence" is a float 0.0-1.0:
+   - 0.8-1.0 = context clearly answers the question
+   - 0.5-0.79 = partial/incomplete information
+   - 0.0-0.49 = insufficient context to answer well
+7. If the context doesn't answer the question, set confidence below 0.4 and explain what information is missing.
+8. Synthesize information from BOTH embedding and web sources to give the most complete answer possible.
+9. When web sources have relevant content, ALWAYS cite them with their URL so users can click through."""
 
-USER_PROMPT_TEMPLATE = """Based on the following documentation context, answer the user's question.
-Respond with a JSON object containing "answer" (markdown string), "citations" (array), and "confidence" (float 0-1).
+USER_PROMPT_TEMPLATE = """Answer the user's question using ALL of the context below. Be detailed and thorough. Cite every source you use.
 
---- EMBEDDING SEARCH RESULTS ---
+══════════ EMBEDDING SOURCES (from local index) ══════════
 {embedding_context}
---- END EMBEDDING RESULTS ---
+══════════ END EMBEDDING SOURCES ══════════
 
---- WEB SEARCH RESULTS (from docs.apimatic.io) ---
+══════════ WEB SOURCES (from docs.apimatic.io) ══════════
 {web_context}
---- END WEB RESULTS ---
+══════════ END WEB SOURCES ══════════
 
 USER QUESTION: {question}
 
-Remember: Output ONLY valid JSON. Include inline citations [1], [2] etc. in your answer and list all sources in the citations array."""
+Respond with a JSON object containing "answer" (detailed markdown), "citations" (array with URLs for web sources), and "confidence" (float 0-1). Output raw JSON only."""
 
 
 @dataclass
@@ -159,10 +159,10 @@ class GroqLLMService:
             title = doc.metadata.get("title", doc.metadata.get("fm_title", ""))
             category = doc.metadata.get("category", "")
 
-            header = f"[Embedding Doc {idx}]"
+            header = f"[Embedding Source {idx}]"
             if title:
                 header += f" Title: {title}"
-            header += f" | Source: {source}"
+            header += f" | File: {source}"
             if category:
                 header += f" | Category: {category}"
             header += f" | Relevance: {score:.4f}"
@@ -174,9 +174,10 @@ class GroqLLMService:
     def _format_web_context(self, web_results: List[Dict]) -> str:
         """
         Format web search results into a context string for the LLM prompt.
+        Includes scraped page content when available, falling back to snippet.
 
         Args:
-            web_results: List of web search result dicts with title, url, snippet
+            web_results: List of web search result dicts with title, url, snippet, page_content
 
         Returns:
             Formatted context string
@@ -189,9 +190,17 @@ class GroqLLMService:
             title = result.get("title", "Untitled")
             url = result.get("url", "")
             snippet = result.get("snippet", "")
+            page_content = result.get("page_content", "")
 
-            header = f"[Web Doc {idx}] Title: {title} | URL: {url}"
-            context_parts.append(f"{header}\n{snippet}")
+            header = f"[Web Source {idx}] Title: {title}\nURL: {url}"
+
+            # Use scraped page content if available, otherwise use snippet
+            if page_content and len(page_content) > len(snippet):
+                content = page_content
+            else:
+                content = snippet
+
+            context_parts.append(f"{header}\n\n{content}")
 
         return "\n\n---\n\n".join(context_parts)
 
@@ -229,7 +238,7 @@ class GroqLLMService:
 
     def _parse_llm_json(self, raw_text: str) -> Dict:
         """
-        Parse the LLM's JSON response, handling common formatting issues.
+        Parse the LLM's JSON response, handling Qwen think tags and common formatting issues.
 
         Args:
             raw_text: Raw text from LLM
@@ -239,37 +248,42 @@ class GroqLLMService:
         """
         text = raw_text.strip()
 
-        # Remove markdown JSON wrapper if present
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
+        # Strip <think>...</think> blocks (Qwen model reasoning)
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-        # Handle <think> tags from Qwen model
-        if "<think>" in text:
-            # Remove everything between <think> and </think>
-            import re
-            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        # Remove markdown JSON wrapper if present
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"^```\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        text = text.strip()
 
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Try to find JSON object in the text
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
+            # Try to find JSON object in the text (handles leading/trailing garbage)
+            brace_start = text.find("{")
+            brace_end = text.rfind("}") + 1
+            if brace_start >= 0 and brace_end > brace_start:
+                candidate = text[brace_start:brace_end]
                 try:
-                    return json.loads(text[start:end])
+                    return json.loads(candidate)
                 except json.JSONDecodeError:
-                    pass
+                    # Try fixing common issues: unescaped newlines in JSON strings
+                    try:
+                        # Replace literal newlines inside strings with \\n
+                        fixed = candidate.replace("\n", "\\n").replace("\r", "")
+                        return json.loads(fixed)
+                    except json.JSONDecodeError:
+                        pass
 
-            # Fallback: return raw text as answer with low confidence
-            logger.warning(f"Failed to parse LLM JSON response, using raw text fallback")
+            # Final fallback: return raw text as answer
+            logger.warning("Failed to parse LLM JSON response, using raw text fallback")
+            # Try to clean up the text for display
+            display_text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+            display_text = re.sub(r"```json\s*", "", display_text)
+            display_text = re.sub(r"\s*```", "", display_text)
             return {
-                "answer": raw_text,
+                "answer": display_text,
                 "citations": [],
                 "confidence": 0.3,
             }
@@ -287,7 +301,7 @@ class GroqLLMService:
         Args:
             question: User's question
             search_results: Vector search results [(Document, score), ...]
-            web_results: Web search results [{"title", "url", "snippet"}, ...]
+            web_results: Web search results [{"title", "url", "snippet", "page_content"}, ...]
             max_tokens: Override default max tokens
 
         Returns:
@@ -350,7 +364,7 @@ class GroqLLMService:
             confidence = max(0.0, min(1.0, confidence))
             is_confident = confidence >= self.confidence_threshold
 
-            # If not confident, replace answer with uncertainty message
+            # If not confident, prepend uncertainty notice
             if not is_confident:
                 answer = (
                     "⚠️ **I'm not confident enough to answer this question accurately.**\n\n"
@@ -433,9 +447,9 @@ class GroqLLMService:
         web_results: List[Dict] = None,
     ) -> Generator:
         """
-        Generate a streaming LLM answer, then yield citations and confidence at the end.
-        Since we need structured JSON for citations/confidence, we collect the full
-        response, parse it, then yield the answer in chunks + metadata.
+        Generate LLM answer and yield answer text in chunks + metadata at end.
+        Uses non-streaming API call since we need to parse structured JSON,
+        then simulates streaming for the UI.
 
         Args:
             question: User's question
@@ -443,7 +457,7 @@ class GroqLLMService:
             web_results: Web search results
 
         Yields:
-            Chunks of the LLM response text
+            Chunks of the answer text, then special metadata tokens
         """
         if not self.is_available:
             yield "⚠️ LLM service unavailable — GROQ_API_KEY not configured. Showing search results only."
@@ -458,8 +472,6 @@ class GroqLLMService:
         )
 
         try:
-            # For structured output, we need the full response (not truly streaming tokens)
-            # because we need to parse JSON. We'll do a non-stream call and simulate chunking.
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -490,11 +502,11 @@ class GroqLLMService:
                 answer = warning + answer
 
             # Yield the answer in chunks for streaming effect
-            chunk_size = 12
+            chunk_size = 15
             for i in range(0, len(answer), chunk_size):
                 yield answer[i:i + chunk_size]
 
-            # Yield metadata as special JSON tokens (the frontend knows to parse these)
+            # Yield metadata as special tokens (frontend parses these)
             yield f"\n__CITATIONS__{json.dumps(citations)}__END_CITATIONS__"
             yield f"\n__CONFIDENCE__{json.dumps({'confidence': confidence, 'is_confident': is_confident})}__END_CONFIDENCE__"
 

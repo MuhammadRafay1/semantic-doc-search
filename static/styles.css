@@ -123,6 +123,19 @@ body {
     gap: 0.75rem;
 }
 
+.logo-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.company-logo {
+    max-height: 32px;
+    max-width: 140px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
 .logo-icon {
     flex-shrink: 0;
 }

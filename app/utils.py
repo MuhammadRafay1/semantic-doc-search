@@ -28,6 +28,7 @@ from app.config import (
     MARKDOWN_SEPARATORS,
     FAISS_INDEX_PATH,
     EMBEDDING_MODEL_NAME,
+    EXCLUDE_DIRS,
 )
 
 # Setup logging
@@ -196,7 +197,7 @@ class DocumentLoader:
         return None
 
     @classmethod
-    def load_documents_from_directory(cls, directory: Path) -> Tuple[List[Document], Dict]:
+    def load_documents_from_directory(cls, directory: Path, exclude_dirs: set = None) -> Tuple[List[Document], Dict]:
         """
         Load all supported documents from a directory (recursively).
 
@@ -216,7 +217,7 @@ class DocumentLoader:
         }
 
         # Skip hidden directories and common non-doc dirs
-        skip_dirs = {'.git', 'node_modules', '__pycache__', '.venv', 'venv'}
+        skip_dirs = exclude_dirs or EXCLUDE_DIRS
 
         for file_path in Path(directory).rglob('*'):
             # Skip files in hidden/excluded directories
@@ -307,7 +308,7 @@ class EmbeddingEngine:
             EmbeddingEngine singleton instance
         """
         if model_key is None:
-            model_key = "all-mpnet-base-v2"
+            model_key = "all-MiniLM-L6-v2"
 
         if cls._instance is None or cls._current_model != model_key:
             cls._instance = cls(model_key)

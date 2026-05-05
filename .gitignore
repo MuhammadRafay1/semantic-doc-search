@@ -31,9 +31,6 @@ Thumbs.db
 # Logs
 *.log
 
-# Embedding model cache (large)
-Vector_Store/apimatic_faiss_index/
-data/apimatic-docs/
 # Keep the Vector_Store (pre-built index ships with deployment)
 # To exclude it, uncomment below:
 # Vector_Store/

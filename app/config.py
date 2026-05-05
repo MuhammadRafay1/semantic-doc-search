@@ -40,9 +40,9 @@ APIMATIC_DOCS_DIR = DATA_DIR / "apimatic-docs"
 # Using the best free sentence-transformer for semantic search
 EMBEDDING_MODEL_NAME = os.getenv(
     "EMBEDDING_MODEL",
-    "sentence-transformers/all-mpnet-base-v2"
+    "sentence-transformers/all-MiniLM-L6-v2"
 )
-EMBEDDING_MODEL_KEY = "all-mpnet-base-v2"
+EMBEDDING_MODEL_KEY = "all-MiniLM-L6-v2"
 
 EMBEDDING_MODELS = {
     "all-MiniLM-L6-v2": {
@@ -103,6 +103,9 @@ MAX_TOP_K = 20
 
 # Supported document formats
 SUPPORTED_FORMATS = ['.txt', '.pdf', '.docx', '.md']
+
+# Folders to exclude from document loading
+EXCLUDE_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'content-old', 'unused files'}
 
 # ─────────────────────────────────────────────
 # LLM Configuration (Groq — Free Tier)
